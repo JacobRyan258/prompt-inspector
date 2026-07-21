@@ -16,10 +16,12 @@ process.env.PROMPT_INSPECTOR_DB = path.join(
   mkdtempSync(path.join(tmpdir(), "prompt-inspector-proxy-test-")),
   "test.db",
 );
+process.env.DATABASE_URL = "";
 process.env.OPENAI_API_KEY = "";
 process.env.INSPECTOR_MODEL_LUNA = "";
 process.env.INSPECTOR_MODEL_TERRA = "";
 process.env.INSPECTOR_MODEL_SOL = "";
+process.env.PROXY_API_KEY = "test-proxy-key";
 
 const { buildServer } = await import("./index.js");
 const core = await import("@prompt-inspector/core");
@@ -41,7 +43,10 @@ const base = `http://127.0.0.1:${port}`;
 const post = (pathName: string, body: unknown): Promise<Response> =>
   fetch(`${base}${pathName}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer test-proxy-key",
+    },
     body: JSON.stringify(body),
   });
 
@@ -52,6 +57,27 @@ const classificationPrompt =
   "Classify this support ticket as billing, bug, or feature request: 'Please add dark mode to the dashboard.'";
 
 try {
+  // 0. Proxy gate — unauthenticated /v1/* is rejected, /health stays open.
+  const noAuthRes = await fetch(`${base}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6-auto", messages: [] }),
+  });
+  check("request without proxy key returns 401", noAuthRes.status === 401, noAuthRes.status);
+
+  const wrongKeyRes = await fetch(`${base}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer wrong-key",
+    },
+    body: JSON.stringify({ model: "gpt-5.6-auto", messages: [] }),
+  });
+  check("request with wrong proxy key returns 401", wrongKeyRes.status === 401, wrongKeyRes.status);
+
+  const healthRes = await fetch(`${base}/health`);
+  check("GET /health stays open without a key", healthRes.status === 200, healthRes.status);
+
   // 1. Auto-routed chat completion (demo) — valid shape, logged, luna recommended.
   const chatRes = await post("/v1/chat/completions", {
     model: "gpt-5.6-auto",
@@ -70,7 +96,7 @@ try {
     chatBody,
   );
 
-  const logged = core.recentRequests(core.getDb(), 10);
+  const logged = await core.recentRequests(await core.getDb(), 10);
   const autoRow = logged.find((r) => r.requestedModel === "gpt-5.6-auto" && r.api === "chat");
   check(
     "auto request logged as demo with recommendedTier luna",
@@ -99,9 +125,9 @@ try {
     messages: [{ role: "user", content: classificationPrompt }],
   });
   await forcedRes.json();
-  const forcedRow = core
-    .recentRequests(core.getDb(), 10)
-    .find((r) => r.requestedModel === "gpt-5.6-sol");
+  const forcedRow = (await core.recentRequests(await core.getDb(), 10)).find(
+    (r) => r.requestedModel === "gpt-5.6-sol",
+  );
   check(
     "forced gpt-5.6-sol logged routedTier sol, recommendedTier luna",
     forcedRow?.routedTier === "sol" && forcedRow.recommendedTier === "luna",
@@ -126,7 +152,9 @@ try {
   );
 
   // 5. Models list — the four proxy-facing model names.
-  const modelsRes = await fetch(`${base}/v1/models`);
+  const modelsRes = await fetch(`${base}/v1/models`, {
+    headers: { authorization: "Bearer test-proxy-key" },
+  });
   const modelsBody = await asJson(modelsRes);
   const ids = (modelsBody.data ?? []).map((m: { id?: string }) => m.id);
   check(

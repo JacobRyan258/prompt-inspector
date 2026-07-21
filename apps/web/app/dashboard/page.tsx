@@ -1,6 +1,7 @@
 import {
   getDashboardStats,
   getDb,
+  isAllDemoTraffic,
   isSeeded,
   recentRequests,
   seedDemoData,
@@ -47,23 +48,15 @@ function savingsTrend(daily: { costUsd: number; savedUsd: number }[]) {
   return Math.round((recent - previous) * 1000) / 10;
 }
 
-export default function DashboardPage() {
-  const db = getDb();
-  if (!isSeeded(db)) seedDemoData();
+export default async function DashboardPage() {
+  const db = await getDb();
+  if (!(await isSeeded(db))) await seedDemoData();
 
-  const stats = getDashboardStats(db);
-  const recent = recentRequests(db, 50);
+  const stats = await getDashboardStats(db);
+  const recent = await recentRequests(db, 50);
 
   // Demo mode: every logged request rode a simulated upstream.
-  const demoRow = db
-    .prepare(
-      `SELECT COUNT(*) AS total,
-              COALESCE(SUM(CASE WHEN upstream_model LIKE 'demo-%' THEN 1 ELSE 0 END), 0) AS demos
-       FROM requests`,
-    )
-    .get() as { total: number; demos: number } | undefined;
-  stats.demo =
-    demoRow !== undefined && demoRow.total > 0 && demoRow.demos === demoRow.total;
+  stats.demo = await isAllDemoTraffic(db);
 
   const { totals } = stats;
   const trend = savingsTrend(stats.daily);

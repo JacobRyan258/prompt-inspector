@@ -34,8 +34,8 @@ export async function POST(request: Request) {
   const runs = await runAllTiers(item.prompt, inspection, tools);
   const mode = runs.every((r) => !r.demo) ? "live" : "demo";
 
-  const db = getDb();
-  recordBenchmarkRun(
+  const db = await getDb();
+  await recordBenchmarkRun(
     db,
     {
       id: randomUUID(),

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BENCHMARKS } from "./benchmarks.js";
 import { inspect } from "./classify.js";
-import { getDb, isSeeded, logRequest } from "./db.js";
+import { closeDb, getDb, isSeeded, logRequest, requestRow } from "./db.js";
 import { TIERS, TIER_ORDER, upstreamModelFor } from "./pricing.js";
 import type { RequestLogEntry, Tier } from "./types.js";
 
@@ -46,20 +46,29 @@ function toolCountFor(itemId: string): number {
   return 0;
 }
 
-export function seedDemoData(force = false): { inserted: number } {
-  const db = getDb();
-  if (!force && isSeeded(db)) return { inserted: 0 };
+export async function seedDemoData(force = false): Promise<{ inserted: number }> {
+  const db = await getDb();
+  if (!force && (await isSeeded(db))) return { inserted: 0 };
   if (force) {
-    db.exec(`DELETE FROM requests; DELETE FROM benchmark_runs; DELETE FROM benchmark_results;`);
+    if (db.kind === "postgres") {
+      // Results reference runs — delete children first.
+      await db.pg`DELETE FROM requests`;
+      await db.pg`DELETE FROM benchmark_results`;
+      await db.pg`DELETE FROM benchmark_runs`;
+    } else {
+      db.sqlite.exec(`DELETE FROM requests; DELETE FROM benchmark_runs; DELETE FROM benchmark_results;`);
+    }
   }
 
   const rand = mulberry32(20260721);
   const now = Date.now();
   const day = 86_400_000;
 
-  const insert = db.transaction((entries: RequestLogEntry[]) => {
-    for (const entry of entries) logRequest(db, entry);
-  });
+  const insert = db.kind === "sqlite"
+    ? db.sqlite.transaction((entries: RequestLogEntry[]) => {
+        for (const entry of entries) void logRequest(db, entry);
+      })
+    : null;
 
   const entries: RequestLogEntry[] = [];
 
@@ -135,7 +144,19 @@ export function seedDemoData(force = false): { inserted: number } {
     }
   }
 
-  insert(entries);
+  if (insert) {
+    insert(entries);
+  } else if (db.kind === "postgres") {
+    // Bulk multi-row inserts — one round trip per row would take minutes
+    // against a remote pooler.
+    const rows = entries.map(requestRow);
+    const CHUNK = 200;
+    await db.pg.begin(async (tx) => {
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        await tx`INSERT INTO requests ${tx(rows.slice(i, i + CHUNK))}`;
+      }
+    });
+  }
   return { inserted: entries.length };
 }
 
@@ -145,10 +166,11 @@ const isMain =
   path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
 if (isMain) {
   const force = process.argv.includes("--force");
-  const { inserted } = seedDemoData(force);
+  const { inserted } = await seedDemoData(force);
   if (inserted === 0) {
     console.log("Database already has requests — nothing seeded (use --force to reseed).");
   } else {
     console.log(`Seeded ${inserted} demo requests across ${PROJECTS.length} projects.`);
   }
+  await closeDb();
 }

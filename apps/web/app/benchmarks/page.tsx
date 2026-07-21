@@ -18,7 +18,7 @@ export const metadata: Metadata = { title: "Benchmarks" };
 
 const TIER_INITIAL: Record<string, string> = { luna: "L", terra: "T", sol: "S" };
 
-export default function BenchmarksPage() {
+export default async function BenchmarksPage() {
   // Router accuracy: predict every item's tier and compare with the human label.
   const predictions = new Map(
     BENCHMARKS.map((item) => {
@@ -31,8 +31,8 @@ export default function BenchmarksPage() {
     (item) => predictions.get(item.id) === item.expectedTier,
   ).length;
 
-  const db = getDb();
-  const history = benchmarkHistory(db, 10);
+  const db = await getDb();
+  const history = await benchmarkHistory(db, 10);
   const titleOf = new Map(BENCHMARKS.map((b) => [b.id, b.title] as const));
 
   return (

@@ -14,6 +14,8 @@ import { formatUsd } from "./format";
 
 const PROXY_URL =
   process.env.PROMPT_INSPECTOR_PROXY_URL ?? "http://localhost:4000";
+// Shared secret for a hosted proxy gated with PROXY_API_KEY. Unset locally.
+const PROXY_KEY = process.env.PROMPT_INSPECTOR_PROXY_KEY;
 
 const TIMEOUT_MS = 6_000;
 
@@ -70,7 +72,10 @@ async function runTier(
   try {
     const res = await fetch(`${PROXY_URL}/v1/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(PROXY_KEY ? { authorization: `Bearer ${PROXY_KEY}` } : {}),
+      },
       body: JSON.stringify({
         model: TIERS[tier].model,
         messages: [{ role: "user", content: prompt }],

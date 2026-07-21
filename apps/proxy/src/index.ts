@@ -20,6 +20,20 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
   });
 
+  // Shared-secret gate: with PROXY_API_KEY set, /v1/* requires a matching
+  // Bearer token. /health stays open so uptime checks and Caddy work.
+  app.addHook("onRequest", async (req, reply) => {
+    if (!config.proxyApiKey || !req.url.startsWith("/v1/")) return;
+    if (req.headers.authorization !== `Bearer ${config.proxyApiKey}`) {
+      await reply.code(401).send({
+        error: {
+          message: "Missing or invalid proxy API key.",
+          type: "invalid_request_error",
+        },
+      });
+    }
+  });
+
   app.get("/health", () => ({
     ok: true,
     mode:

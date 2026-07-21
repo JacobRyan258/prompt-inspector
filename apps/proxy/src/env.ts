@@ -34,4 +34,7 @@ export const config = {
     "",
   ),
   openaiApiKey: process.env.OPENAI_API_KEY,
+  // When set, every /v1/* request must send `Authorization: Bearer <this key>`.
+  // Unset keeps the proxy open (local zero-config default).
+  proxyApiKey: process.env.PROXY_API_KEY,
 } as const;

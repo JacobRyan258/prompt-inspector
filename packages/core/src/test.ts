@@ -13,10 +13,14 @@ import { estimateTokens, normalizeInput } from "./tokens.js";
 import { getDb, getDashboardStats, logRequest } from "./db.js";
 import { seedDemoData } from "./seed.js";
 
+// Storage is pinned to throwaway SQLite files below — keep Postgres out of the
+// test run even if the repo-root .env configures it (db.ts dotenv-loads it).
+process.env.DATABASE_URL = "";
+
 let failures = 0;
-function check(name: string, fn: () => void): void {
+async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
   try {
-    fn();
+    await fn();
     console.log(`  ok  ${name}`);
   } catch (err) {
     failures += 1;
@@ -25,7 +29,7 @@ function check(name: string, fn: () => void): void {
   }
 }
 
-check("cheap classification prompt routes to Luna", () => {
+await check("cheap classification prompt routes to Luna", () => {
   const r = inspect({ prompt: "Classify this review as positive or negative: 'Loved it, works perfectly.'" });
   assert.equal(r.tier, "luna");
   assert.ok(r.reasons.includes("classification task"));
@@ -33,7 +37,7 @@ check("cheap classification prompt routes to Luna", () => {
   assert.ok(r.solPremiumPct > 100);
 });
 
-check("coding prompt with a stack trace routes at least Terra", () => {
+await check("coding prompt with a stack trace routes at least Terra", () => {
   const r = inspect({
     prompt:
       "Debug this TypeError: ```ts\nconst x = user.profile.name;\nconsole.log(x)\n``` — it crashes when profile is undefined. Fix the code.",
@@ -42,7 +46,7 @@ check("coding prompt with a stack trace routes at least Terra", () => {
   assert.ok(r.reasons.some((x) => x.includes("code")));
 });
 
-check("architecture prompt routes to Sol", () => {
+await check("architecture prompt routes to Sol", () => {
   const r = inspect({
     prompt:
       "Architect a distributed event-driven system that scales to 100k req/s with failover across regions. Discuss trade-offs of microservices vs modular monolith, design the consistency model, and think step by step through failure scenarios.",
@@ -51,7 +55,7 @@ check("architecture prompt routes to Sol", () => {
   assert.equal(r.reasoning, "high");
 });
 
-check("images force a Terra floor", () => {
+await check("images force a Terra floor", () => {
   const r = inspect({
     messages: [
       { role: "user", content: [{ type: "text", text: "What does this say?" }, { type: "image_url", image_url: { url: "data:..." } }] },
@@ -61,7 +65,7 @@ check("images force a Terra floor", () => {
   assert.ok(r.reasons.some((x) => x.includes("image")));
 });
 
-check("many tools force a Terra floor", () => {
+await check("many tools force a Terra floor", () => {
   const r = inspect({
     prompt: "Handle this request.",
     tools: [{}, {}, {}, {}],
@@ -69,26 +73,26 @@ check("many tools force a Terra floor", () => {
   assert.ok(r.tier === "terra" || r.tier === "sol");
 });
 
-check("cost math is sane", () => {
+await check("cost math is sane", () => {
   const luna = estimateCostUsd("luna", 1000, 500);
   const sol = estimateCostUsd("sol", 1000, 500);
   assert.ok(sol > luna * 10);
   assert.ok(Math.abs(luna - 0.0012) < 1e-9);
 });
 
-check("token estimation is roughly chars/4", () => {
+await check("token estimation is roughly chars/4", () => {
   assert.equal(estimateTokens("a".repeat(400)), 100);
   const n = normalizeInput({ messages: [{ role: "user", content: "hello" }] });
   assert.equal(n.text, "hello");
 });
 
-check("model name parsing", () => {
+await check("model name parsing", () => {
   assert.equal(parseModelTier("gpt-5.6-auto"), "auto");
   assert.equal(parseModelTier("gpt-5.6-luna"), "luna");
   assert.equal(parseModelTier(undefined), "auto");
 });
 
-check("optimizer trims few-shot bloat and projects savings", () => {
+await check("optimizer trims few-shot bloat and projects savings", () => {
   const fewShot = [
     "Classify the sentiment of each message.",
     "Example 1: 'I love this' → positive",
@@ -104,7 +108,7 @@ check("optimizer trims few-shot bloat and projects savings", () => {
   assert.ok(trim!.rewrite && trim!.rewrite.length < fewShot.length);
 });
 
-check("optimizer drops deep-think phrasing when it inflates the tier", () => {
+await check("optimizer drops deep-think phrasing when it inflates the tier", () => {
   const config =
     "server {\n  listen 80;\n  server_name example.com;\n  keepalive_timeout 65;\n  gzip on;\n  client_max_body_size 50m;\n}\n".repeat(25);
   const prompt = `Think step by step: review the following nginx config and tell me if anything looks off.\n\n${config}`;
@@ -116,12 +120,12 @@ check("optimizer drops deep-think phrasing when it inflates the tier", () => {
   assert.equal(drop!.projectedTier, "luna");
 });
 
-check("db logging + dashboard stats + waste detection", () => {
+await check("db logging + dashboard stats + waste detection", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "pi-test-"));
   process.env.PROMPT_INSPECTOR_DB = path.join(dir, "test.db");
-  const db = getDb();
+  const db = await getDb();
   const inspection = inspect({ prompt: "Translate 'good morning' to French." });
-  logRequest(db, {
+  await logRequest(db, {
     id: "test-1",
     ts: Date.now(),
     project: "tests",
@@ -145,17 +149,17 @@ check("db logging + dashboard stats + waste detection", () => {
     hadTools: false,
     hadImages: false,
   });
-  const stats = getDashboardStats(db);
+  const stats = await getDashboardStats(db);
   assert.equal(stats.totals.requests, 1);
   assert.ok(stats.waste.headline !== null); // routed sol, classifier said cheaper
 });
 
-check("seed generates deterministic demo data", () => {
+await check("seed generates deterministic demo data", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "pi-seed-"));
   process.env.PROMPT_INSPECTOR_DB = path.join(dir, "seed.db");
-  const first = seedDemoData(true);
+  const first = await seedDemoData(true);
   assert.ok(first.inserted > 400, `expected hundreds of rows, got ${first.inserted}`);
-  const stats = getDashboardStats(getDb());
+  const stats = await getDashboardStats(await getDb());
   assert.ok(stats.totals.savingsPct > 20);
   assert.ok(stats.daily.length >= 10);
   assert.ok(stats.projects.length >= 3);

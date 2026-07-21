@@ -150,34 +150,37 @@ function persist(
   const errored = status === "error";
   const costUsd = errored ? 0 : estimateCostUsd(ctx.routedTier, tokens.inputTokens, tokens.outputTokens);
   const solCostUsd = errored ? 0 : estimateCostUsd("sol", tokens.inputTokens, tokens.outputTokens);
-  try {
-    logRequest(getDb(), {
-      id: randomUUID(),
-      ts: Date.now(),
-      project: ctx.project,
-      api: ctx.api,
-      requestedModel: ctx.requestedModel,
-      routedTier: ctx.routedTier,
-      recommendedTier: ctx.inspection.tier,
-      upstreamModel: ctx.upstreamModel,
-      taskType: ctx.inspection.taskType,
-      reasons: ctx.inspection.reasons,
-      confidence: ctx.inspection.confidence,
-      inputTokens: tokens.inputTokens,
-      outputTokens: tokens.outputTokens,
-      costUsd,
-      solCostUsd,
-      savedUsd: Math.max(0, solCostUsd - costUsd),
-      latencyMs,
-      status,
-      streaming: ctx.streaming,
-      forced: ctx.forced,
-      hadTools: ctx.hadTools,
-      hadImages: ctx.hadImages,
+  // Fire-and-forget: logging must never block the response path.
+  void getDb()
+    .then((db) =>
+      logRequest(db, {
+        id: randomUUID(),
+        ts: Date.now(),
+        project: ctx.project,
+        api: ctx.api,
+        requestedModel: ctx.requestedModel,
+        routedTier: ctx.routedTier,
+        recommendedTier: ctx.inspection.tier,
+        upstreamModel: ctx.upstreamModel,
+        taskType: ctx.inspection.taskType,
+        reasons: ctx.inspection.reasons,
+        confidence: ctx.inspection.confidence,
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+        costUsd,
+        solCostUsd,
+        savedUsd: Math.max(0, solCostUsd - costUsd),
+        latencyMs,
+        status,
+        streaming: ctx.streaming,
+        forced: ctx.forced,
+        hadTools: ctx.hadTools,
+        hadImages: ctx.hadImages,
+      }),
+    )
+    .catch((err) => {
+      console.error("[prompt-inspector] failed to persist request log:", err);
     });
-  } catch (err) {
-    console.error("[prompt-inspector] failed to persist request log:", err);
-  }
 }
 
 const SSE_HEADERS = {
@@ -365,8 +368,13 @@ export async function routeRequest(
   const routedTier = forced ?? inspection.tier;
   const mapped = upstreamModelFor(routedTier);
   const authHeader = req.headers.authorization;
-  const authorization =
-    typeof authHeader === "string" && authHeader !== ""
+  // With the proxy gate enabled, the caller's Bearer token is the proxy key —
+  // never forward it upstream; the proxy's own OpenAI key is the only source.
+  const authorization = config.proxyApiKey
+    ? config.openaiApiKey
+      ? `Bearer ${config.openaiApiKey}`
+      : undefined
+    : typeof authHeader === "string" && authHeader !== ""
       ? authHeader
       : config.openaiApiKey
         ? `Bearer ${config.openaiApiKey}`

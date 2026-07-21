@@ -5,11 +5,17 @@ Tagline: *Before you spend money asking GPT-5.6... let Kimi inspect your prompt 
 
 ## Layout
 
-- `packages/core` — the routing brain (`@prompt-inspector/core`). Pure TS + better-sqlite3.
-  Consumed as TS source (no build step): web via `transpilePackages`, proxy via `tsx`.
-- `apps/proxy` — Fastify 5, OpenAI-compatible endpoints. **The only writer to SQLite.**
-- `apps/web` — Next.js 15 (App Router). Reads SQLite via core from server components.
-- `.data/` — shared SQLite file (WAL), gitignored, auto-created.
+- `packages/core` — the routing brain (`@prompt-inspector/core`). Pure TS +
+  better-sqlite3 + postgres (dotenv). Consumed as TS source (no build step):
+  web via `transpilePackages`, proxy via `tsx`.
+- `apps/proxy` — Fastify 5, OpenAI-compatible endpoints. **The only writer to the DB.**
+  With `PROXY_API_KEY` set, `/v1/*` requires that Bearer token (gate for public
+  hosting) and caller Authorization is no longer forwarded upstream.
+- `apps/web` — Next.js 15 (App Router). Reads the DB via core from server components.
+- Storage — Supabase Postgres when `DATABASE_URL` is set (root `.env`,
+  transaction pooler: `prepare:false`, `ssl:"require"`, small pool). When unset,
+  zero-config fallback: shared SQLite file at `.data/` (WAL, gitignored,
+  auto-created). All db.ts functions are async so both backends share one signature.
 
 ## Commands
 
