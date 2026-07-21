@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Native modules that are allowed to run their install scripts
+# (better-sqlite3 prebuilds, esbuild + sharp binaries).
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  sharp: true

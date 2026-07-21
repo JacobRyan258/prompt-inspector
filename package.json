@@ -1,0 +1,31 @@
+{
+  "name": "prompt-inspector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Before you spend money asking GPT-5.6... let Kimi inspect your prompt first.",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "start": "turbo start",
+    "db:seed": "pnpm --filter @prompt-inspector/core seed",
+    "test": "turbo test",
+    "clean": "turbo clean && rm -rf node_modules .data"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "keywords": [
+    "openai",
+    "llm",
+    "routing",
+    "cost-optimization",
+    "ai",
+    "proxy"
+  ],
+  "license": "MIT"
+}
