@@ -50,7 +50,9 @@ function savingsTrend(daily: { costUsd: number; savedUsd: number }[]) {
 
 export default async function DashboardPage() {
   const db = await getDb();
-  if (!(await isSeeded(db))) await seedDemoData();
+  // Auto-seed demo data only for zero-config local SQLite. A configured
+  // Postgres starts empty and fills with real proxy traffic.
+  if (!process.env.DATABASE_URL && !(await isSeeded(db))) await seedDemoData();
 
   const stats = await getDashboardStats(db);
   const recent = await recentRequests(db, 50);
